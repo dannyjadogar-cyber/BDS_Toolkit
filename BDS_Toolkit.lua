@@ -190,7 +190,7 @@ local config = {
         helpFontScale    = 1.0,
         autoUpdateCheck  = true,
         autoUpdateInstall= false,
-        updateUrl        = "https://raw.githubusercontent.com/DannyJadogar/BDS_Toolkit/main/version.json",
+        updateUrl        = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/version.json",
     },
     chatmode = {
         enabled           = true,
@@ -844,7 +844,7 @@ local function writeConfigNow()
         f:write(string.format("chatSubTab=%d\n", config.general.chatSubTab or 1))
         f:write(string.format("autoUpdateCheck=%s\n", tostring(config.general.autoUpdateCheck ~= false)))
         f:write(string.format("autoUpdateInstall=%s\n", tostring(config.general.autoUpdateInstall == true)))
-        f:write(string.format("updateUrl=%s\n\n", config.general.updateUrl or "https://raw.githubusercontent.com/DannyJadogar/BDS_Toolkit/main/version.json"))
+        f:write(string.format("updateUrl=%s\n\n", config.general.updateUrl or "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/version.json"))
 
         -- Chat Modes (Room Editor)
         f:write("[chatmode]\n")
@@ -3801,8 +3801,8 @@ end
 local UPDATE_CONFIG = {
     currentVersion  = "1.0.0",
     versionNum      = 100,
-    defaultUrl      = "https://raw.githubusercontent.com/DannyJadogar/BDS_Toolkit/main/version.json",
-    defaultScript   = "https://raw.githubusercontent.com/DannyJadogar/BDS_Toolkit/main/BDS_Toolkit.lua",
+    defaultUrl      = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/version.json",
+    defaultScript   = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/BDS_Toolkit.lua",
 }
 
 local updaterState = {
