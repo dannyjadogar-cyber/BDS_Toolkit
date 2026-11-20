@@ -1,6 +1,6 @@
 -- ==============================================================================
 --  BDS TOOLKIT - ALL-IN-ONE CLIENT RP SUITE & CLIENT ENHANCER
---  Version: 1.0.0 (Official V1.0 Release)
+--  Version: 1.0.1 (Official Release)
 --  Modules: Keybinder, AutoCar, Downloader HUD, Chat Modes, VehInfo, SensFix & Fixes
 --  Added: Native Auto-Updater, Vehicle Free-Look Camera, SprintHook, FPS HUD & Anonymized Damage Feed
 --  Developer & Author: Danny_Jadogar (CHACHA)
@@ -9,7 +9,7 @@
 script_name("BDS Toolkit")
 script_description("All-in-One RP Suite: Keybinder, AutoCar, Downloader, VehInfo HUD & SensFix by Danny_Jadogar (CHACHA)")
 script_author("Danny_Jadogar (CHACHA)")
-script_version("1.0.0")
+script_version("1.0.1")
 script_properties("work-in-pause")
 
 require('lib.moonloader')
@@ -3785,8 +3785,8 @@ end
 -- BDS TOOLKIT NATIVE AUTO-UPDATER & RELEASE SYNC SYSTEM
 -- ==============================================================================
 local UPDATE_CONFIG = {
-    currentVersion  = "1.0.0",
-    versionNum      = 100,
+    currentVersion  = "1.0.1",
+    versionNum      = 101,
     defaultUrl      = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/version.json",
     defaultScript   = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/refs/heads/main/BDS_Toolkit.lua",
 }
@@ -3804,6 +3804,135 @@ local updaterState = {
     lastCheckTime   = 0,
 }
 
+-- Safe Out-of-Process Downloader via Windows curl.exe
+-- Runs curl in an isolated external background process with CREATE_NO_WINDOW.
+-- Completely immune to Valrise samp.asi in-process socket hooking crashes.
+pcall(ffi.cdef, [[
+    typedef struct _SECURITY_ATTRIBUTES {
+        uint32_t nLength;
+        void* lpSecurityDescriptor;
+        int32_t bInheritHandle;
+    } SECURITY_ATTRIBUTES;
+
+    typedef struct _STARTUPINFOA {
+        uint32_t cb;
+        char* lpReserved;
+        char* lpDesktop;
+        char* lpTitle;
+        uint32_t dwX;
+        uint32_t dwY;
+        uint32_t dwXSize;
+        uint32_t dwYSize;
+        uint32_t dwXCountChars;
+        uint32_t dwYCountChars;
+        uint32_t dwFillAttribute;
+        uint32_t dwFlags;
+        uint16_t wShowWindow;
+        uint16_t cbReserved2;
+        uint8_t* lpReserved2;
+        void* hStdInput;
+        void* hStdOutput;
+        void* hStdError;
+    } STARTUPINFOA;
+
+    typedef struct _PROCESS_INFORMATION {
+        void* hProcess;
+        void* hThread;
+        uint32_t dwProcessId;
+        uint32_t dwThreadId;
+    } PROCESS_INFORMATION;
+
+    int CreateProcessA(
+        const char* lpApplicationName,
+        char* lpCommandLine,
+        SECURITY_ATTRIBUTES* lpProcessAttributes,
+        SECURITY_ATTRIBUTES* lpThreadAttributes,
+        int bInheritHandles,
+        uint32_t dwCreationFlags,
+        void* lpEnvironment,
+        const char* lpCurrentDirectory,
+        STARTUPINFOA* lpStartupInfo,
+        PROCESS_INFORMATION* lpProcessInformation
+    );
+
+    uint32_t WaitForSingleObject(void* hHandle, uint32_t dwMilliseconds);
+    int CloseHandle(void* hObject);
+    int GetExitCodeProcess(void* hProcess, uint32_t* lpExitCode);
+]])
+
+local function safeDownloadUrl(url, destPath, timeoutSec)
+    timeoutSec = timeoutSec or 20
+    pcall(os.remove, destPath)
+
+    local cmd = string.format('curl.exe -s -L "%s" -o "%s"', url, destPath)
+    local cmdBuf = ffi.new("char[?]", #cmd + 1)
+    ffi.copy(cmdBuf, cmd)
+
+    local si = ffi.new("STARTUPINFOA")
+    si.cb = ffi.sizeof("STARTUPINFOA")
+    si.dwFlags = 1 -- STARTF_USESHOWWINDOW
+    si.wShowWindow = 0 -- SW_HIDE
+
+    local pi = ffi.new("PROCESS_INFORMATION")
+    local CREATE_NO_WINDOW = 0x08000000
+
+    local ok = ffi.C.CreateProcessA(nil, cmdBuf, nil, nil, 0, CREATE_NO_WINDOW, nil, nil, si, pi)
+    if ok == 0 then
+        -- Fallback to os.execute hidden if CreateProcessA fails
+        pcall(os.execute, string.format('start /b "" curl.exe -s -L "%s" -o "%s"', url, destPath))
+        local startT = os.clock()
+        while os.clock() - startT < timeoutSec do
+            wait(100)
+            local testF = io.open(destPath, "rb")
+            if testF then
+                local sz = testF:seek("end")
+                testF:close()
+                if sz and sz > 0 then
+                    wait(200)
+                    return true, nil
+                end
+            end
+        end
+        return false, "Download timed out"
+    end
+
+    local startT = os.clock()
+    local finished = false
+    local success = false
+    while true do
+        local waitRes = ffi.C.WaitForSingleObject(pi.hProcess, 50)
+        if waitRes == 0 then
+            local exitCode = ffi.new("uint32_t[1]")
+            ffi.C.GetExitCodeProcess(pi.hProcess, exitCode)
+            success = (exitCode[0] == 0)
+            finished = true
+            break
+        elseif waitRes == 0x102 then
+            wait(50)
+            if os.clock() - startT > timeoutSec then
+                break
+            end
+        else
+            break
+        end
+    end
+
+    ffi.C.CloseHandle(pi.hProcess)
+    ffi.C.CloseHandle(pi.hThread)
+
+    if not finished or not success then
+        return false, "Download failed or timed out"
+    end
+
+    local f = io.open(destPath, "rb")
+    if not f then return false, "Target file could not be created" end
+    local sz = f:seek("end")
+    f:close()
+    if not sz or sz == 0 then return false, "Zero-byte file received" end
+
+    return true, nil
+end
+
 local function parseVersionManifest(rawText)
     if not rawText or #rawText < 5 then return nil end
     local okJson, cjson = pcall(require, 'cjson')
@@ -3811,8 +3940,8 @@ local function parseVersionManifest(rawText)
         local ok, data = pcall(cjson.decode, rawText)
         if ok and type(data) == "table" then
             return {
-                version    = data.version or "1.0.0",
-                versionNum = tonumber(data.version_num) or 100,
+                version    = data.version or "1.0.1",
+                versionNum = tonumber(data.version_num) or 101,
                 changelog  = data.changelog or "",
                 scriptUrl  = data.script_url or ""
             }
@@ -3825,8 +3954,8 @@ local function parseVersionManifest(rawText)
     local sUrl = rawText:match('"script_url"%s*:%s*"([^"]+)"')
     if v or vNum then
         return {
-            version    = v or "1.0.0",
-            versionNum = vNum or 100,
+            version    = v or "1.0.1",
+            versionNum = vNum or 101,
             changelog  = cl or "",
             scriptUrl  = sUrl or ""
         }
@@ -3852,37 +3981,12 @@ local function checkScriptUpdate(isManual)
         local workDir = getWorkingDirectory and getWorkingDirectory() or "moonloader"
         local tempManifest = workDir .. "\\config\\bds_manifest_tmp.json"
 
-        local isDone = false
-        local isError = false
-
-        local dlId = downloadUrlToFile(manifestUrl, tempManifest, function(id, status, p1, p2)
-            if status == 6 or status == 58 then
-                isDone = true
-            end
-        end)
-
-        if not dlId then
+        local okDl, errDl = safeDownloadUrl(manifestUrl, tempManifest, 10)
+        if not okDl then
             updaterState.status = "ERROR"
-            updaterState.statusMsg = "Failed to query server (Network offline or URL invalid)"
+            updaterState.statusMsg = "Could not reach update server."
             updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
             if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Could not reach update server. Check internet connection or URL.", -1) end
-            return
-        end
-
-        local startT = os.clock()
-        while not isDone do
-            wait(100)
-            if os.clock() - startT > 10.0 then
-                isError = true
-                break
-            end
-        end
-
-        if isError then
-            updaterState.status = "ERROR"
-            updaterState.statusMsg = "Update check timed out."
-            updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-            if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Update server timed out.", -1) end
             return
         end
 
@@ -3902,7 +4006,13 @@ local function checkScriptUpdate(isManual)
             updaterState.latestVersion    = parsed.version
             updaterState.latestVersionNum = parsed.versionNum
             updaterState.changelog        = parsed.changelog
-            updaterState.downloadUrl      = (#parsed.scriptUrl > 5) and parsed.scriptUrl or UPDATE_CONFIG.defaultScript
+
+            -- Sanity check: Ensure downloadUrl points to a .lua file and not version.json
+            local dlUrl = parsed.scriptUrl
+            if not dlUrl or #dlUrl < 5 or dlUrl:find("version%.json") or not dlUrl:find("%.lua") then
+                dlUrl = UPDATE_CONFIG.defaultScript
+            end
+            updaterState.downloadUrl      = dlUrl
             updaterState.lastCheckTime    = os.clock()
 
             if parsed.versionNum > UPDATE_CONFIG.versionNum then
@@ -3943,9 +4053,8 @@ downloadAndInstallUpdate = function()
     end
 
     local scriptUrl = updaterState.downloadUrl or UPDATE_CONFIG.defaultScript
-    if not scriptUrl or #scriptUrl < 5 then
-        sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} No download URL specified in update manifest.", -1)
-        return
+    if not scriptUrl or #scriptUrl < 5 or scriptUrl:find("version%.json") or not scriptUrl:find("%.lua") then
+        scriptUrl = UPDATE_CONFIG.defaultScript
     end
 
     lua_thread.create(function()
@@ -3958,41 +4067,13 @@ downloadAndInstallUpdate = function()
         local tempScriptPath = currentScriptPath .. ".tmp"
         local backupScriptPath = currentScriptPath .. ".bak"
 
-        local isDone = false
-        local isFailed = false
-
-        local dlId = downloadUrlToFile(scriptUrl, tempScriptPath, function(id, status, p1, p2)
-            if status == 5 then -- STATUS_DOWNLOADINGDATA
-                updaterState.downloadBytes = p1
-                updaterState.totalBytes = p2
-            elseif status == 6 or status == 58 then -- STATUS_ENDDOWNLOADDATA or STATUSEX_ENDDOWNLOAD
-                isDone = true
-            end
-        end)
-
-        if not dlId then
-            updaterState.status = "ERROR"
-            updaterState.statusMsg = "Failed to start script download."
-            updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-            sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Failed to initiate download from update server.", -1)
-            return
-        end
-
-        local startT = os.clock()
-        while not isDone do
-            wait(100)
-            if os.clock() - startT > 25.0 then
-                isFailed = true
-                break
-            end
-        end
-
-        if isFailed then
+        local okDl, errDl = safeDownloadUrl(scriptUrl, tempScriptPath, 30)
+        if not okDl then
             pcall(os.remove, tempScriptPath)
             updaterState.status = "ERROR"
-            updaterState.statusMsg = "Download timed out."
+            updaterState.statusMsg = "Download failed."
             updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-            sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Download timed out.", -1)
+            sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Download failed: " .. tostring(errDl), -1)
             return
         end
 
@@ -4041,9 +4122,9 @@ downloadAndInstallUpdate = function()
         pcall(os.remove, tempScriptPath)
 
         updaterState.status = "SUCCESS"
-        updaterState.statusMsg = string.format("Updated to v%s! Reloading...", updaterState.latestVersion or "V1")
+        updaterState.statusMsg = string.format("Updated to v%s! Reloading...", updaterState.latestVersion or "1.0.1")
         updaterState.statusColor = imgui.ImVec4(0.00, 0.90, 0.46, 1.00)
-        sampAddChatMessage(string.format("{00E676}[BDS Updater]{FFFFFF} Update successfully installed ({00E676}v%s{FFFFFF})! Reloading script in 1 second...", updaterState.latestVersion or "V1"), -1)
+        sampAddChatMessage(string.format("{00E676}[BDS Updater]{FFFFFF} Update successfully installed ({00E676}v%s{FFFFFF})! Reloading script in 1 second...", updaterState.latestVersion or "1.0.1"), -1)
 
         wait(1000)
         thisScript():reload()
@@ -5953,7 +6034,7 @@ local function renderTabHelp()
 
     imgui.TextColored(imgui.ImVec4(0.70, 0.75, 0.85, 1.00), "CURRENT VERSION:")
     imgui.SameLine()
-    imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "v1.0.0 (Official V1 Release)")
+    imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "v1.0.1 (Official Release)")
 
     imgui.SameLine(imgui.GetWindowWidth() - 210)
     if imgui.Button("Check for Updates Now##btn_chk_upd", imgui.ImVec2(195, 22)) then
@@ -6001,7 +6082,7 @@ local function renderTabHelp()
     imgui.Spacing()
     imgui.Separator()
 
-    imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "BDS Toolkit v1.0 (Official Release)")
+    imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "BDS Toolkit v1.0.1 (Official Release)")
     imgui.SameLine()
     imgui.TextColored(imgui.ImVec4(0.70, 0.75, 0.85, 1.00), "- Authored & Developed by")
     imgui.SameLine()
@@ -6474,9 +6555,9 @@ imgui.OnFrame(
             local menuAlpha = (config.general.menuOpacity or 90) / 100.0
             imgui.SetNextWindowBgAlpha(menuAlpha)
 
-            if imgui.Begin("BDS TOOLKIT v1.0 | Danny_Jadogar (CHACHA)###BdsToolkitWin", state.mainWindowOpen, imgui.WindowFlags.NoCollapse) then
+            if imgui.Begin("BDS TOOLKIT v1.0.1 | Danny_Jadogar (CHACHA)###BdsToolkitWin", state.mainWindowOpen, imgui.WindowFlags.NoCollapse) then
                 -- BDS Branding Header
-                imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "BDS TOOLKIT v1.0")
+                imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "BDS TOOLKIT v1.0.1")
                 imgui.SameLine()
                 imgui.TextColored(imgui.ImVec4(0.70, 0.75, 0.85, 1.00), "|")
                 imgui.SameLine()
@@ -6579,7 +6660,7 @@ imgui.OnFrame(
 
                 imgui.Spacing()
                 imgui.Separator()
-                imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "BDS Suite v1.0")
+                imgui.TextColored(imgui.ImVec4(0.00, 0.90, 0.46, 1.00), "BDS Suite v1.0.1")
                 imgui.TextColored(imgui.ImVec4(0.40, 0.45, 0.55, 1.00), "Danny_Jadogar")
                 imgui.EndChild()
                 imgui.PopStyleColor(2)
@@ -8396,7 +8477,7 @@ function main()
     end)
 
 
-    sampAddChatMessage("{00E676}[BDS Toolkit]{FFFFFF} Loaded v1.0 by {FF0000}Danny_Jadogar (CHACHA){FFFFFF}. Press {00E676}F12{FFFFFF} or type {00E676}/bds", -1)
+    sampAddChatMessage("{00E676}[BDS Toolkit]{FFFFFF} Loaded v1.0.1 by {FF0000}Danny_Jadogar (CHACHA){FFFFFF}. Press {00E676}F12{FFFFFF} or type {00E676}/bds", -1)
 
     if config.general.autoUpdateCheck ~= false then
         lua_thread.create(function()
