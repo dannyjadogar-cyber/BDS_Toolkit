@@ -3778,21 +3778,7 @@ end
 
 -- 3.6. Vehicle Camera No-Recenter (Modern Free-Look Driving)
 local function applyCameraNoRecenter(enable)
-    pcall(function()
-        if enable then
-            -- GTA SA 1.0 US CCam::Process_FollowCar auto-centering bypass
-            memory.setuint16(0x005258EC, 0x9090, true)
-            memory.setuint16(0x00525A31, 0x9090, true)
-            memory.setuint32(0x00525A33, 0x90909090, true)
-            tweaksState.camNoRecenterActive = true
-        else
-            -- Restore original GTA SA 1.0 US bytes
-            memory.setuint16(0x005258EC, 0x0674, true)
-            memory.setuint16(0x00525A31, 0x1274, true)
-            memory.setuint32(0x00525A33, 0x102444D9, true)
-            tweaksState.camNoRecenterActive = false
-        end
-    end)
+    tweaksState.camNoRecenterActive = (enable == true)
 end
 
 -- ==============================================================================
@@ -3802,7 +3788,7 @@ local UPDATE_CONFIG = {
     currentVersion  = "1.0.0",
     versionNum      = 100,
     defaultUrl      = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/version.json",
-    defaultScript   = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/main/BDS_Toolkit.lua",
+    defaultScript   = "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/refs/heads/main/BDS_Toolkit.lua",
 }
 
 local updaterState = {
@@ -3856,96 +3842,98 @@ local function checkScriptUpdate(isManual)
         return
     end
 
-    updaterState.status = "CHECKING"
-    updaterState.statusMsg = "Checking for updates..."
-    updaterState.statusColor = imgui.ImVec4(1.00, 0.85, 0.20, 1.00)
-    if isManual then sampAddChatMessage("{00CCFF}[BDS Updater]{FFFFFF} Checking for updates...", -1) end
+    lua_thread.create(function()
+        updaterState.status = "CHECKING"
+        updaterState.statusMsg = "Checking for updates..."
+        updaterState.statusColor = imgui.ImVec4(1.00, 0.85, 0.20, 1.00)
+        if isManual then sampAddChatMessage("{00CCFF}[BDS Updater]{FFFFFF} Checking for updates...", -1) end
 
-    local manifestUrl = (config.general.updateUrl and #config.general.updateUrl > 5) and config.general.updateUrl or UPDATE_CONFIG.defaultUrl
-    local workDir = getWorkingDirectory and getWorkingDirectory() or "moonloader"
-    local tempManifest = workDir .. "\\config\\bds_manifest_tmp.json"
+        local manifestUrl = (config.general.updateUrl and #config.general.updateUrl > 5) and config.general.updateUrl or UPDATE_CONFIG.defaultUrl
+        local workDir = getWorkingDirectory and getWorkingDirectory() or "moonloader"
+        local tempManifest = workDir .. "\\config\\bds_manifest_tmp.json"
 
-    local isDone = false
-    local isError = false
+        local isDone = false
+        local isError = false
 
-    local dlId = downloadUrlToFile(manifestUrl, tempManifest, function(id, status, p1, p2)
-        if status == 6 or status == 58 then
-            isDone = true
-        end
-    end)
-
-    if not dlId then
-        updaterState.status = "ERROR"
-        updaterState.statusMsg = "Failed to query server (Network offline or URL invalid)"
-        updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-        if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Could not reach update server. Check internet connection or URL.", -1) end
-        return
-    end
-
-    local startT = os.clock()
-    while not isDone do
-        wait(100)
-        if os.clock() - startT > 10.0 then
-            isError = true
-            break
-        end
-    end
-
-    if isError then
-        updaterState.status = "ERROR"
-        updaterState.statusMsg = "Update check timed out."
-        updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-        if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Update server timed out.", -1) end
-        return
-    end
-
-    local f = io.open(tempManifest, "r")
-    if not f then
-        updaterState.status = "ERROR"
-        updaterState.statusMsg = "Unable to read temporary manifest."
-        updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-        return
-    end
-    local raw = f:read("*a")
-    f:close()
-    pcall(os.remove, tempManifest)
-
-    local parsed = parseVersionManifest(raw)
-    if parsed and parsed.versionNum then
-        updaterState.latestVersion    = parsed.version
-        updaterState.latestVersionNum = parsed.versionNum
-        updaterState.changelog        = parsed.changelog
-        updaterState.downloadUrl      = (#parsed.scriptUrl > 5) and parsed.scriptUrl or UPDATE_CONFIG.defaultScript
-        updaterState.lastCheckTime    = os.clock()
-
-        if parsed.versionNum > UPDATE_CONFIG.versionNum then
-            updaterState.status = "UPDATE_AVAILABLE"
-            updaterState.statusMsg = string.format("New Version Available: v%s", parsed.version)
-            updaterState.statusColor = imgui.ImVec4(0.00, 0.90, 0.46, 1.00)
-
-            sampAddChatMessage(string.format("{00CCFF}[BDS Updater]{FFFFFF} New update available: {00E676}v%s{FFFFFF}! (Current: v%s)", parsed.version, UPDATE_CONFIG.currentVersion), -1)
-            if parsed.changelog and #parsed.changelog > 0 then
-                sampAddChatMessage(string.format("{00CCFF}[BDS Updater]{FFFFFF} Changelog: {00E5FF}%s", parsed.changelog), -1)
+        local dlId = downloadUrlToFile(manifestUrl, tempManifest, function(id, status, p1, p2)
+            if status == 6 or status == 58 then
+                isDone = true
             end
-            sampAddChatMessage("{00CCFF}[BDS Updater]{FFFFFF} Type {00E676}/bdsupdate{FFFFFF} or click 'Update Now' in F12 menu to install.", -1)
+        end)
 
-            if config.general.autoUpdateInstall then
-                downloadAndInstallUpdate()
+        if not dlId then
+            updaterState.status = "ERROR"
+            updaterState.statusMsg = "Failed to query server (Network offline or URL invalid)"
+            updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
+            if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Could not reach update server. Check internet connection or URL.", -1) end
+            return
+        end
+
+        local startT = os.clock()
+        while not isDone do
+            wait(100)
+            if os.clock() - startT > 10.0 then
+                isError = true
+                break
+            end
+        end
+
+        if isError then
+            updaterState.status = "ERROR"
+            updaterState.statusMsg = "Update check timed out."
+            updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
+            if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Update server timed out.", -1) end
+            return
+        end
+
+        local f = io.open(tempManifest, "r")
+        if not f then
+            updaterState.status = "ERROR"
+            updaterState.statusMsg = "Unable to read temporary manifest."
+            updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
+            return
+        end
+        local raw = f:read("*a")
+        f:close()
+        pcall(os.remove, tempManifest)
+
+        local parsed = parseVersionManifest(raw)
+        if parsed and parsed.versionNum then
+            updaterState.latestVersion    = parsed.version
+            updaterState.latestVersionNum = parsed.versionNum
+            updaterState.changelog        = parsed.changelog
+            updaterState.downloadUrl      = (#parsed.scriptUrl > 5) and parsed.scriptUrl or UPDATE_CONFIG.defaultScript
+            updaterState.lastCheckTime    = os.clock()
+
+            if parsed.versionNum > UPDATE_CONFIG.versionNum then
+                updaterState.status = "UPDATE_AVAILABLE"
+                updaterState.statusMsg = string.format("New Version Available: v%s", parsed.version)
+                updaterState.statusColor = imgui.ImVec4(0.00, 0.90, 0.46, 1.00)
+
+                sampAddChatMessage(string.format("{00CCFF}[BDS Updater]{FFFFFF} New update available: {00E676}v%s{FFFFFF}! (Current: v%s)", parsed.version, UPDATE_CONFIG.currentVersion), -1)
+                if parsed.changelog and #parsed.changelog > 0 then
+                    sampAddChatMessage(string.format("{00CCFF}[BDS Updater]{FFFFFF} Changelog: {00E5FF}%s", parsed.changelog), -1)
+                end
+                sampAddChatMessage("{00CCFF}[BDS Updater]{FFFFFF} Type {00E676}/bdsupdate{FFFFFF} or click 'Update Now' in F12 menu to install.", -1)
+
+                if config.general.autoUpdateInstall then
+                    downloadAndInstallUpdate()
+                end
+            else
+                updaterState.status = "UP_TO_DATE"
+                updaterState.statusMsg = string.format("You are running the latest version (v%s)", UPDATE_CONFIG.currentVersion)
+                updaterState.statusColor = imgui.ImVec4(0.00, 0.90, 0.46, 1.00)
+                if isManual then
+                    sampAddChatMessage(string.format("{00E676}[BDS Updater]{FFFFFF} You are running the latest version ({00E676}v%s{FFFFFF}).", UPDATE_CONFIG.currentVersion), -1)
+                end
             end
         else
-            updaterState.status = "UP_TO_DATE"
-            updaterState.statusMsg = string.format("You are running the latest version (v%s)", UPDATE_CONFIG.currentVersion)
-            updaterState.statusColor = imgui.ImVec4(0.00, 0.90, 0.46, 1.00)
-            if isManual then
-                sampAddChatMessage(string.format("{00E676}[BDS Updater]{FFFFFF} You are running the latest version ({00E676}v%s{FFFFFF}).", UPDATE_CONFIG.currentVersion), -1)
-            end
+            updaterState.status = "ERROR"
+            updaterState.statusMsg = "Invalid manifest received from server."
+            updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
+            if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Invalid update manifest received.", -1) end
         end
-    else
-        updaterState.status = "ERROR"
-        updaterState.statusMsg = "Invalid manifest received from server."
-        updaterState.statusColor = imgui.ImVec4(1.00, 0.35, 0.35, 1.00)
-        if isManual then sampAddChatMessage("{FF5252}[BDS Updater]{FFFFFF} Invalid update manifest received.", -1) end
-    end
+    end)
 end
 
 downloadAndInstallUpdate = function()
@@ -4639,9 +4627,16 @@ local function updateGameplayTweaks()
             tweaksState.hillParkHolding = false
         end
 
-        -- Vehicle Camera No-Recenter Watchdog
-        if config.tweaks.enabled and config.tweaks.cameraNoRecenter and not tweaksState.camNoRecenterActive then
-            applyCameraNoRecenter(true)
+        -- Real-Time Vehicle Camera Free-Look / No-Recenter
+        -- Keeps mouse look timer (0x00B6EC24) synchronized with game time (0x00B7CB84) while driving.
+        -- Bypasses GTA SA's CCam::Process_FollowCar auto-centering cleanly without touching executable code.
+        if config.tweaks.enabled and config.tweaks.cameraNoRecenter and doesCharExist(PLAYER_PED) and isCharInAnyCar(PLAYER_PED) then
+            pcall(function()
+                local tNow = memory.getuint32(0x00B7CB84, false)
+                if tNow and tNow > 0 then
+                    memory.setuint32(0x00B6EC24, tNow, false)
+                end
+            end)
         end
 
 
@@ -8405,7 +8400,11 @@ function main()
 
     if config.general.autoUpdateCheck ~= false then
         lua_thread.create(function()
-            wait(3500)
+            -- Wait safely until the player is fully connected to the server and in-game
+            while not isSampAvailable() or sampGetGamestate() ~= 3 do
+                wait(500)
+            end
+            wait(7000) -- Allow 7s for server textures, CEF UI, and initial connection to settle
             pcall(checkScriptUpdate, false)
         end)
     end
