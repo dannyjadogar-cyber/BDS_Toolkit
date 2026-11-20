@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "version_num": 100,
+  "version": "1.0.1",
+  "version_num": 101,
   "changelog": "Official V1.0 Release! Keybinder (100 slots, 5 profiles, Mask ID privacy protection), AutoCar, FiveM DL HUD, Chat Modes & Chatlog, VehInfo 3D HUD, SensFix Suite, SprintHook, Free-Look Camera, and Native Auto-Updater.",
   "script_url": "https://raw.githubusercontent.com/dannyjadogar-cyber/BDS_Toolkit/refs/heads/main/version.json"
 }
