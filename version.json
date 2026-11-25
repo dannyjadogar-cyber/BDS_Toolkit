@@ -1,6 +1,6 @@
 {
-  "version": "1.1",
-  "version_num": 2,
-  "changelog": "`/help` Command Conflict Resolved! • SensFix Weapon & Drive-By Multipliers Fix",
+  "version": "1.2",
+  "version_num": 3,
+  "changelog": "Server Rules Voilation is removed from the script, made it voilaton free.",
   "discord_url": "https://discord.gg/cRxfbuCwgY"
 }
